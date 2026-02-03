@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  My personal Claude assistant that runs securely in Apple containers. Lightweight and built to be understood and customized for your own needs.
+  My personal Claude assistant that runs securely in Docker containers. Lightweight and built to be understood and customized for your own needs.
 </p>
 
 ## Why I Built This
@@ -20,13 +20,13 @@ cd nanoclaw
 claude
 ```
 
-Then run `/setup`. Claude Code handles everything: dependencies, authentication, container setup, service configuration.
+Then run `/setup`. Claude Code handles everything: dependencies, bot token, container setup, service configuration.
 
 ## Philosophy
 
 **Small enough to understand.** One process, a few source files. No microservices, no message queues, no abstraction layers. Have Claude Code walk you through it.
 
-**Secure by isolation.** Agents run in Linux containers (Apple Container). They can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your Mac.
+**Secure by isolation.** Agents run in Docker containers. They can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your host.
 
 **Built for one user.** This isn't a framework. It's working software that fits my exact needs. You fork it and have Claude Code make it match your exact needs.
 
@@ -42,29 +42,31 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 
 ## What It Supports
 
-- **WhatsApp I/O** - Message Claude from your phone
-- **Isolated group context** - Each group has its own `CLAUDE.md` memory, isolated filesystem, and runs in its own container sandbox with only that filesystem mounted
-- **Main channel** - Your private channel (self-chat) for admin control; every other group is completely isolated
+- **Telegram I/O** - Message Claude from any device via Telegram
+- **Per-topic sessions** - Each Telegram topic gets isolated context, memory, and filesystem
+- **Bidirectional reactions** - Bot can react to messages, user reactions can trigger agent
+- **Configurable triggers** - Per-chat choice of "always respond" or "@mention only"
+- **Main channel** - Your private chat for admin control; every other chat/topic is isolated
 - **Scheduled tasks** - Recurring jobs that run Claude and can message you back
 - **Web access** - Search and fetch content
-- **Container isolation** - Agents sandboxed in Apple containers
+- **Container isolation** - Agents sandboxed in Docker containers
 - **Optional integrations** - Add Gmail (`/add-gmail`) and more via skills
 
 ## Usage
 
-Talk to your assistant with the trigger word (default: `@Andy`):
+Talk to your assistant with the trigger word (default: `@Nanomi`):
 
 ```
-@Andy send an overview of the sales pipeline every weekday morning at 9am (has access to my Obsidian vault folder)
-@Andy review the git history for the past week each Friday and update the README if there's drift
-@Andy every Monday at 8am, compile news on AI developments from Hacker News and TechCrunch and message me a briefing
+@Nanomi send an overview of the sales pipeline every weekday morning at 9am (has access to my Obsidian vault folder)
+@Nanomi review the git history for the past week each Friday and update the README if there's drift
+@Nanomi every Monday at 8am, compile news on AI developments from Hacker News and TechCrunch and message me a briefing
 ```
 
-From the main channel (your self-chat), you can manage groups and tasks:
+From the main channel (your private chat with the bot), you can manage chats and tasks:
 ```
-@Andy list all scheduled tasks across groups
-@Andy pause the Monday briefing task
-@Andy join the Family Chat group
+@Nanomi list all scheduled tasks across chats
+@Nanomi pause the Monday briefing task
+@Nanomi register the Family Chat group
 ```
 
 ## Customizing
@@ -93,7 +95,7 @@ Users then run `/add-telegram` on their fork and get clean code that does exactl
 Skills we'd love to see:
 
 **Communication Channels**
-- `/add-telegram` - Add Telegram as channel. Should give the user option to replace WhatsApp or add as additional channel. Also should be possible to add it as a control channel (where it can trigger actions) or just a channel that can be used in actions triggered elsewhere
+- `/add-whatsapp` - Add WhatsApp as an additional channel
 - `/add-slack` - Add Slack
 - `/add-discord` - Add Discord
 
@@ -105,39 +107,41 @@ Skills we'd love to see:
 
 ## Requirements
 
-- macOS Tahoe (26) or later - runs great on Mac Mini
+- macOS or Linux
 - Node.js 20+
 - [Claude Code](https://claude.ai/download)
-- [Apple Container](https://github.com/apple/container)
+- [Docker](https://docker.com/products/docker-desktop)
 
 ## Architecture
 
 ```
-WhatsApp (baileys) --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
+Telegram (grammY) --> SQLite (libsql) --> Container (Claude Agent SDK) --> Response
 ```
 
 Single Node.js process. Agents execute in isolated Linux containers with mounted directories. IPC via filesystem. No daemons, no queues, no complexity.
 
 Key files:
-- `src/index.ts` - Main app: WhatsApp connection, routing, IPC
+- `src/index.ts` - Main app: Telegram bot, routing, IPC
+- `src/telegram-client.ts` - grammY bot setup and handlers
+- `src/session-manager.ts` - Maps chat/topic to session folders
 - `src/container-runner.ts` - Spawns agent containers
 - `src/task-scheduler.ts` - Runs scheduled tasks
-- `src/db.ts` - SQLite operations
-- `groups/*/CLAUDE.md` - Per-group memory
+- `src/db.ts` - SQLite operations (libsql)
+- `groups/*/CLAUDE.md` - Per-topic memory
 
 ## FAQ
 
-**Why WhatsApp and not Telegram/Signal/etc?**
+**Why Telegram?**
 
-Because I use WhatsApp. Fork it and run a skill to change it. That's the whole point.
+Telegram has excellent bot APIs, supports topics for per-conversation isolation, and has native reaction support. The grammY library provides a clean TypeScript-first interface.
 
-**Why Apple Container instead of Docker?**
+**Why Docker?**
 
-Lightweight, fast, and built into macOS. Requires macOS Tahoe and runs great on a Mac Mini. Contribute a skill to convert to Docker if you want Docker.
+Docker provides cross-platform support (macOS and Linux), a large ecosystem, and mature tooling. Docker Desktop on macOS uses a lightweight Linux VM similar to other container solutions.
 
-**Can I run this on Linux?**
+**Can I run this on macOS?**
 
-Yes. Run Claude Code and say "make this run on Linux." ~30 min of back-and-forth and it'll work. When you're done, ask Claude to create a skill explaining how to make it work on Linux, then contribute the skill back to the project.
+Yes. NanoClaw uses Docker, which works on both macOS and Linux. Just install Docker Desktop and run `/setup`.
 
 **Is this secure?**
 

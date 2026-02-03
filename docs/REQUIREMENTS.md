@@ -20,7 +20,7 @@ The entire codebase should be something you can read and understand. One Node.js
 
 ### Security Through True Isolation
 
-Instead of application-level permission systems trying to prevent agents from accessing things, agents run in actual Linux containers (Apple Container). The isolation is at the OS level. Agents can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your Mac.
+Instead of application-level permission systems trying to prevent agents from accessing things, agents run in actual Docker containers. The isolation is at the OS level. Agents can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your host.
 
 ### Built for One User
 
@@ -54,13 +54,7 @@ Skills to add or switch to different messaging platforms:
 - `/add-sms` - Add SMS via Twilio or similar
 - `/convert-to-telegram` - Replace WhatsApp with Telegram entirely
 
-### Container Runtime
-The project currently uses Apple Container (macOS-only). We need:
-- `/convert-to-docker` - Replace Apple Container with standard Docker
-- This unlocks Linux support and broader deployment options
-
 ### Platform Support
-- `/setup-linux` - Make the full setup work on Linux (depends on Docker conversion)
 - `/setup-windows` - Windows support via WSL2 + Docker
 
 ---
@@ -71,7 +65,7 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 
 **Core components:**
 - **Claude Agent SDK** as the core agent
-- **Apple Container** for isolated agent execution (Linux VMs)
+- **Docker** for isolated agent execution
 - **WhatsApp** as the primary I/O channel
 - **Persistent memory** per conversation and globally
 - **Scheduled tasks** that run Claude and can message back
@@ -90,7 +84,7 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 ### Message Routing
 - A router listens to WhatsApp and routes messages based on configuration
 - Only messages from registered groups are processed
-- Trigger: `@Andy` prefix (case insensitive), configurable via `ASSISTANT_NAME` env var
+- Trigger: `@Nanomi` prefix (case insensitive), configurable via `ASSISTANT_NAME` env var
 - Unregistered groups are ignored completely
 
 ### Memory System
@@ -104,7 +98,7 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 - Sessions auto-compact when context gets too long, preserving critical information
 
 ### Container Isolation
-- All agents run inside Apple Container (lightweight Linux VMs)
+- All agents run inside Docker containers
 - Each agent invocation spawns a container with mounted directories
 - Containers provide filesystem isolation - agents can only see mounted paths
 - Bash access is safe because commands run inside the container, not on the host
@@ -184,8 +178,8 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 
 These are the creator's settings, stored here for reference:
 
-- **Trigger**: `@Andy` (case insensitive)
-- **Response prefix**: `Andy:`
+- **Trigger**: `@Nanomi` (case insensitive)
+- **Response prefix**: `Nanomi:`
 - **Persona**: Default Claude (no custom personality)
 - **Main channel**: Self-chat (messaging yourself in WhatsApp)
 

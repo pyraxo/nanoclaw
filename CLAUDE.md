@@ -4,26 +4,30 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 ## Quick Context
 
-Single Node.js process that connects to WhatsApp, routes messages to Claude Agent SDK running in Apple Container (Linux VMs). Each group has isolated filesystem and memory.
+Single Node.js process that connects to Telegram via grammY, routes messages to Claude Agent SDK running in Docker containers. Each chat/topic has isolated filesystem and memory. Uses libsql for SQLite storage.
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `src/index.ts` | Main app: WhatsApp connection, message routing, IPC |
-| `src/config.ts` | Trigger pattern, paths, intervals |
+| `src/index.ts` | Main app: Telegram bot, message routing, IPC |
+| `src/telegram-client.ts` | grammY bot setup, message/reaction handlers |
+| `src/session-manager.ts` | Maps chat_id+topic_id to session folders |
+| `src/config.ts` | Bot token, paths, intervals |
 | `src/container-runner.ts` | Spawns agent containers with mounts |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
-| `src/db.ts` | SQLite operations |
-| `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
+| `src/db.ts` | SQLite operations (libsql) |
+| `groups/{folder}/CLAUDE.md` | Per-topic memory (isolated) |
 
 ## Skills
 
 | Skill | When to Use |
 |-------|-------------|
-| `/setup` | First-time installation, authentication, service configuration |
-| `/customize` | Adding channels, integrations, changing behavior |
+| `/setup` | First-time installation, bot token, container setup |
+| `/customize` | Adding integrations, changing behavior |
 | `/debug` | Container issues, logs, troubleshooting |
+| `/add-logging` | Set up pino structured logging, replace console.log |
+| `/add-telegram` | Add Telegram channel to new deployments |
 
 ## Development
 
@@ -35,8 +39,30 @@ npm run build        # Compile TypeScript
 ./container/build.sh # Rebuild agent container
 ```
 
-Service management:
+Service management (systemd on Linux):
 ```bash
-launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
+sudo systemctl start nanoclaw
+sudo systemctl stop nanoclaw
+sudo systemctl status nanoclaw
+```
+
+## Viewing Logs
+
+Logs are in `logs/` with date suffixes:
+- `logs/nanoclaw-YYYY-MM-DD.log` - All logs (info and above)
+- `logs/nanoclaw-error-YYYY-MM-DD.log` - Errors only (warn and above)
+
+When debugging issues, check logs:
+```bash
+# Today's logs
+tail -100 logs/nanoclaw-$(date +%Y-%m-%d).log
+
+# Today's errors only
+tail -100 logs/nanoclaw-error-$(date +%Y-%m-%d).log
+
+# Systemd daemon logs (if running as service)
+sudo journalctl -u nanoclaw -n 100 --no-pager
+
+# Live tail daemon logs
+sudo journalctl -u nanoclaw -f
 ```
