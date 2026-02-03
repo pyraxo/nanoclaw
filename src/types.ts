@@ -33,47 +33,147 @@ export interface ContainerConfig {
   env?: Record<string, string>;
 }
 
-export interface RegisteredGroup {
-  name: string;
-  folder: string;
-  trigger: string;
-  added_at: string;
+// ============== Telegram Types ==============
+
+/**
+ * Session key for topic-based sessions
+ * Each chat+topic combination gets its own isolated session
+ */
+export interface SessionKey {
+  chatId: number;
+  topicId: number;  // 0 for non-forum chats or General topic
+}
+
+export function sessionKeyToString(key: SessionKey): string {
+  return `${key.chatId}_${key.topicId}`;
+}
+
+export function stringToSessionKey(str: string): SessionKey {
+  const [chatId, topicId] = str.split('_').map(Number);
+  return { chatId, topicId: topicId || 0 };
+}
+
+/**
+ * Trigger configuration for a chat or topic
+ */
+export interface TriggerConfig {
+  mode: 'always' | 'mention' | 'disabled';
+  mentionPattern?: string;  // Custom pattern (default: bot username)
+}
+
+/**
+ * Registered chat configuration (stored in JSON)
+ */
+export interface RegisteredChat {
+  chatId: number;
+  chatType: 'private' | 'group' | 'supergroup' | 'channel';
+  chatTitle: string;
+  defaultTrigger: TriggerConfig;
+  addedAt: string;
+  addedBy?: number;  // User ID who registered
   containerConfig?: ContainerConfig;
 }
 
-export interface Session {
-  [folder: string]: string;
+/**
+ * Topic within a supergroup (stored in SQLite)
+ */
+export interface RegisteredTopic {
+  chatId: number;
+  topicId: number;
+  topicName: string;
+  folder: string;  // Session folder name
+  triggerMode: 'always' | 'mention' | 'disabled';
+  lastMessageTime?: string;
 }
 
+/**
+ * Session mapping (group folder to session ID)
+ */
+export interface Session {
+  [key: string]: string;  // key is sessionKeyToString format: "chatId_topicId"
+}
+
+/**
+ * Message from database
+ */
+export interface StoredMessage {
+  id: string;
+  chatId: number;
+  topicId: number;
+  senderId: number;
+  senderName: string;
+  content: string;
+  type: 'text' | 'reaction' | 'agent_response';
+  timestamp: string;
+  isBot: boolean;
+  replyToMessageId?: number;
+  // Reaction-specific fields
+  reactionEmoji?: string;
+  reactionAction?: 'added' | 'removed';
+  targetMessageId?: number;
+  // Agent response fields
+  agentSessionId?: string;
+}
+
+/**
+ * New message for processing (simplified view)
+ */
 export interface NewMessage {
   id: string;
-  chat_jid: string;
-  sender: string;
-  sender_name: string;
+  chatId: number;
+  topicId: number;
+  senderId: number;
+  senderName: string;
   content: string;
   timestamp: string;
 }
 
+/**
+ * Scheduled task with topic support
+ */
 export interface ScheduledTask {
   id: string;
-  group_folder: string;
-  chat_jid: string;
+  chatId: number;
+  topicId: number;
+  folder: string;  // Session folder
   prompt: string;
-  schedule_type: 'cron' | 'interval' | 'once';
-  schedule_value: string;
-  context_mode: 'group' | 'isolated';
-  next_run: string | null;
-  last_run: string | null;
-  last_result: string | null;
+  scheduleType: 'cron' | 'interval' | 'once';
+  scheduleValue: string;
+  contextMode: 'group' | 'isolated';
+  nextRun: string | null;
+  lastRun: string | null;
+  lastResult: string | null;
   status: 'active' | 'paused' | 'completed';
-  created_at: string;
+  createdAt: string;
 }
 
 export interface TaskRunLog {
-  task_id: string;
-  run_at: string;
-  duration_ms: number;
+  taskId: string;
+  runAt: string;
+  durationMs: number;
   status: 'success' | 'error';
   result: string | null;
   error: string | null;
+}
+
+/**
+ * Chat info from database
+ */
+export interface ChatInfo {
+  chatId: number;
+  chatType: string;
+  chatTitle: string;
+  lastMessageTime: string;
+}
+
+/**
+ * Topic info from database
+ */
+export interface TopicInfo {
+  chatId: number;
+  topicId: number;
+  topicName: string;
+  folder: string;
+  triggerMode: string;
+  lastMessageTime: string | null;
 }

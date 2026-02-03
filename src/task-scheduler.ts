@@ -2,10 +2,10 @@ import fs from 'fs';
 import path from 'path';
 import pino from 'pino';
 import { CronExpressionParser } from 'cron-parser';
-import { getDueTasks, updateTaskAfterRun, logTaskRun, getTaskById, getAllTasks } from './db.js';
-import { ScheduledTask, RegisteredGroup } from './types.js';
-import { GROUPS_DIR, SCHEDULER_POLL_INTERVAL, DATA_DIR, MAIN_GROUP_FOLDER, TIMEZONE } from './config.js';
-import { runContainerAgent, writeTasksSnapshot } from './container-runner.js';
+import { getDueTasks, updateTaskAfterRun, logTaskRun, getTaskById, getAllTasks, getTopic } from './db.js';
+import { ScheduledTask, RegisteredChat, sessionKeyToString } from './types.js';
+import { GROUPS_DIR, SCHEDULER_POLL_INTERVAL, MAIN_FOLDER, TIMEZONE } from './config.js';
+import { containerPool, writeTasksSnapshot } from './container-pool.js';
 
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
@@ -13,45 +13,45 @@ const logger = pino({
 });
 
 export interface SchedulerDependencies {
-  sendMessage: (jid: string, text: string) => Promise<void>;
-  registeredGroups: () => Record<string, RegisteredGroup>;
+  sendMessage: (chatId: number, topicId: number, text: string) => Promise<unknown>;
+  getRegisteredChat: (chatId: number) => RegisteredChat | undefined;
   getSessions: () => Record<string, string>;
 }
 
 async function runTask(task: ScheduledTask, deps: SchedulerDependencies): Promise<void> {
   const startTime = Date.now();
-  const groupDir = path.join(GROUPS_DIR, task.group_folder);
+  const groupDir = path.join(GROUPS_DIR, task.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  logger.info({ taskId: task.id, group: task.group_folder }, 'Running scheduled task');
+  logger.info({ taskId: task.id, folder: task.folder }, 'Running scheduled task');
 
-  const groups = deps.registeredGroups();
-  const group = Object.values(groups).find(g => g.folder === task.group_folder);
+  const registeredChat = deps.getRegisteredChat(task.chatId);
+  const topic = getTopic(task.chatId, task.topicId);
 
-  if (!group) {
-    logger.error({ taskId: task.id, groupFolder: task.group_folder }, 'Group not found for task');
+  if (!registeredChat) {
+    logger.error({ taskId: task.id, chatId: task.chatId }, 'Chat not registered for task');
     logTaskRun({
-      task_id: task.id,
-      run_at: new Date().toISOString(),
-      duration_ms: Date.now() - startTime,
+      taskId: task.id,
+      runAt: new Date().toISOString(),
+      durationMs: Date.now() - startTime,
       status: 'error',
       result: null,
-      error: `Group not found: ${task.group_folder}`
+      error: `Chat not registered: ${task.chatId}`
     });
     return;
   }
 
-  // Update tasks snapshot for container to read (filtered by group)
-  const isMain = task.group_folder === MAIN_GROUP_FOLDER;
+  // Update tasks snapshot for container to read (filtered by folder)
+  const isMain = task.folder === MAIN_FOLDER;
   const tasks = getAllTasks();
-  writeTasksSnapshot(task.group_folder, isMain, tasks.map(t => ({
+  writeTasksSnapshot(task.folder, isMain, tasks.map(t => ({
     id: t.id,
-    groupFolder: t.group_folder,
+    folder: t.folder,
     prompt: t.prompt,
-    schedule_type: t.schedule_type,
-    schedule_value: t.schedule_value,
+    scheduleType: t.scheduleType,
+    scheduleValue: t.scheduleValue,
     status: t.status,
-    next_run: t.next_run
+    nextRun: t.nextRun
   })));
 
   let result: string | null = null;
@@ -59,17 +59,26 @@ async function runTask(task: ScheduledTask, deps: SchedulerDependencies): Promis
 
   // For group context mode, use the group's current session
   const sessions = deps.getSessions();
-  const sessionId = task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
+  const sessionId = task.contextMode === 'group' ? sessions[task.folder] : undefined;
+  const sessionKey = sessionKeyToString({ chatId: task.chatId, topicId: task.topicId });
+  const chatTitle = registeredChat.chatTitle;
+  const topicName = topic?.topicName || 'General';
 
   try {
-    const output = await runContainerAgent(group, {
-      prompt: task.prompt,
-      sessionId,
-      groupFolder: task.group_folder,
-      chatJid: task.chat_jid,
-      isMain,
-      isScheduledTask: true
-    });
+    const output = await containerPool.runContainer(
+      task.folder,
+      `${chatTitle} - ${topicName}`,
+      {
+        prompt: task.prompt,
+        sessionId,
+        folder: task.folder,
+        sessionKey,
+        isMain,
+        isScheduledTask: true,
+        chatType: registeredChat.chatType
+      },
+      registeredChat.containerConfig
+    );
 
     if (output.status === 'error') {
       error = output.error || 'Unknown error';
@@ -86,20 +95,20 @@ async function runTask(task: ScheduledTask, deps: SchedulerDependencies): Promis
   const durationMs = Date.now() - startTime;
 
   logTaskRun({
-    task_id: task.id,
-    run_at: new Date().toISOString(),
-    duration_ms: durationMs,
+    taskId: task.id,
+    runAt: new Date().toISOString(),
+    durationMs,
     status: error ? 'error' : 'success',
     result,
     error
   });
 
   let nextRun: string | null = null;
-  if (task.schedule_type === 'cron') {
-    const interval = CronExpressionParser.parse(task.schedule_value, { tz: TIMEZONE });
+  if (task.scheduleType === 'cron') {
+    const interval = CronExpressionParser.parse(task.scheduleValue, { tz: TIMEZONE });
     nextRun = interval.next().toISOString();
-  } else if (task.schedule_type === 'interval') {
-    const ms = parseInt(task.schedule_value, 10);
+  } else if (task.scheduleType === 'interval') {
+    const ms = parseInt(task.scheduleValue, 10);
     nextRun = new Date(Date.now() + ms).toISOString();
   }
   // 'once' tasks have no next run
