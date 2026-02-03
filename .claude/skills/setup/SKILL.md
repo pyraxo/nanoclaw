@@ -13,31 +13,36 @@ Run all commands automatically. Only pause when user action is required (scannin
 npm install
 ```
 
-## 2. Install Apple Container
+## 2. Install Docker
 
-Check if Apple Container is installed:
+Check if Docker is installed and running:
 
 ```bash
-which container && container --version || echo "Not installed"
+docker --version && docker info >/dev/null 2>&1 && echo "Docker is running" || echo "Docker not running or not installed"
 ```
 
-If not installed, tell the user:
-> Apple Container is required for running agents in isolated environments.
+If not installed or not running, tell the user:
+> Docker is required for running agents in isolated environments.
 >
-> 1. Download the latest `.pkg` from https://github.com/apple/container/releases
-> 2. Double-click to install
-> 3. Run `container system start` to start the service
+> **macOS:**
+> 1. Download Docker Desktop from https://docker.com/products/docker-desktop
+> 2. Install and start Docker Desktop
+> 3. Wait for the whale icon in the menu bar to stop animating
+>
+> **Linux:**
+> ```bash
+> curl -fsSL https://get.docker.com | sh
+> sudo systemctl start docker
+> sudo usermod -aG docker $USER  # Then log out and back in
+> ```
 >
 > Let me know when you've completed these steps.
 
 Wait for user confirmation, then verify:
 
 ```bash
-container system start
-container --version
+docker run --rm hello-world
 ```
-
-**Note:** NanoClaw automatically starts the Apple Container system when it launches, so you don't need to start it manually after reboots.
 
 ## 3. Configure Claude Authentication
 
@@ -95,10 +100,11 @@ Build the NanoClaw agent container:
 
 This creates the `nanoclaw-agent:latest` image with Node.js, Chromium, Claude Code CLI, and agent-browser.
 
-Verify the build succeeded (the `container images` command may not work due to a plugin issue, so we verify by running a simple test):
+Verify the build succeeded:
 
 ```bash
-echo '{}' | container run -i --entrypoint /bin/echo nanoclaw-agent:latest "Container OK" || echo "Container build failed"
+docker images | grep nanoclaw-agent
+echo '{}' | docker run -i --rm --entrypoint /bin/echo nanoclaw-agent:latest "Container OK" || echo "Container build failed"
 ```
 
 ## 5. WhatsApp Authentication
@@ -124,12 +130,12 @@ If it says "Already authenticated", skip to the next step.
 ## 6. Configure Assistant Name
 
 Ask the user:
-> What trigger word do you want to use? (default: `Andy`)
+> What trigger word do you want to use? (default: `Nanomi`)
 >
 > Messages starting with `@TriggerWord` will be sent to Claude.
 
-If they choose something other than `Andy`, update it in these places:
-1. `groups/CLAUDE.md` - Change "# Andy" and "You are Andy" to the new name
+If they choose something other than `Nanomi`, update it in these places:
+1. `groups/CLAUDE.md` - Change "# Nanomi" and "You are Nanomi" to the new name
 2. `groups/main/CLAUDE.md` - Same changes at the top
 3. `data/registered_groups.json` - Use `@NewName` as the trigger when registering groups
 
@@ -363,7 +369,7 @@ The user should receive a response in WhatsApp.
 **Service not starting**: Check `logs/nanoclaw.error.log`
 
 **Container agent fails with "Claude Code process exited with code 1"**:
-- Ensure Apple Container is running: `container system start`
+- Ensure Docker is running: `docker info`
 - Check container logs: `cat groups/main/logs/container-*.log | tail -50`
 
 **No response to messages**:
