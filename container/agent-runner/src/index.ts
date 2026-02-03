@@ -11,8 +11,8 @@ import { createIpcMcp } from './ipc-mcp.js';
 interface ContainerInput {
   prompt: string;
   sessionId?: string;
-  groupFolder: string;
-  chatJid: string;
+  folder: string;
+  sessionKey: string;  // Format: chatId_topicId
   isMain: boolean;
   isScheduledTask?: boolean;
 }
@@ -47,11 +47,16 @@ async function readStdin(): Promise<string> {
 
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+const READY_MARKER = '---NANOCLAW_READY---';
 
 function writeOutput(output: ContainerOutput): void {
   console.log(OUTPUT_START_MARKER);
   console.log(JSON.stringify(output));
   console.log(OUTPUT_END_MARKER);
+}
+
+function signalReady(): void {
+  console.error(READY_MARKER);
 }
 
 function log(message: string): void {
@@ -189,7 +194,7 @@ function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | nu
   lines.push('');
 
   for (const msg of messages) {
-    const sender = msg.role === 'user' ? 'User' : 'Andy';
+    const sender = msg.role === 'user' ? 'User' : 'Nanomi';
     const content = msg.content.length > 2000
       ? msg.content.slice(0, 2000) + '...'
       : msg.content;
@@ -200,25 +205,10 @@ function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | nu
   return lines.join('\n');
 }
 
-async function main(): Promise<void> {
-  let input: ContainerInput;
-
-  try {
-    const stdinData = await readStdin();
-    input = JSON.parse(stdinData);
-    log(`Received input for group: ${input.groupFolder}`);
-  } catch (err) {
-    writeOutput({
-      status: 'error',
-      result: null,
-      error: `Failed to parse input: ${err instanceof Error ? err.message : String(err)}`
-    });
-    process.exit(1);
-  }
-
+async function processMessage(input: ContainerInput): Promise<void> {
   const ipcMcp = createIpcMcp({
-    chatJid: input.chatJid,
-    groupFolder: input.groupFolder,
+    sessionKey: input.sessionKey,
+    folder: input.folder,
     isMain: input.isMain
   });
 
@@ -282,8 +272,89 @@ async function main(): Promise<void> {
       newSessionId,
       error: errorMessage
     });
-    process.exit(1);
   }
 }
 
-main();
+async function mainCold(): Promise<void> {
+  let input: ContainerInput;
+
+  try {
+    const stdinData = await readStdin();
+    input = JSON.parse(stdinData);
+    log(`Received input for folder: ${input.folder}`);
+  } catch (err) {
+    writeOutput({
+      status: 'error',
+      result: null,
+      error: `Failed to parse input: ${err instanceof Error ? err.message : String(err)}`
+    });
+    process.exit(1);
+  }
+
+  await processMessage(input);
+}
+
+async function mainWarm(): Promise<void> {
+  const readline = await import('readline');
+  const idleTimeout = parseInt(process.env.IDLE_TIMEOUT || '1800', 10) * 1000;
+
+  log(`Starting warm mode with ${idleTimeout}ms idle timeout`);
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: false
+  });
+
+  // Signal ready to receive first message
+  signalReady();
+
+  let timeoutHandle: NodeJS.Timeout | null = null;
+
+  const resetIdleTimeout = () => {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+    timeoutHandle = setTimeout(() => {
+      log('Idle timeout reached, exiting');
+      rl.close();
+      process.exit(0);
+    }, idleTimeout);
+  };
+
+  resetIdleTimeout();
+
+  for await (const line of rl) {
+    if (!line.trim()) continue;
+
+    resetIdleTimeout();
+
+    try {
+      const input: ContainerInput = JSON.parse(line);
+      log(`Received input for folder: ${input.folder}`);
+      await processMessage(input);
+    } catch (err) {
+      writeOutput({
+        status: 'error',
+        result: null,
+        error: `Failed to parse input: ${err instanceof Error ? err.message : String(err)}`
+      });
+    }
+
+    // Signal ready for next message
+    signalReady();
+  }
+
+  if (timeoutHandle) {
+    clearTimeout(timeoutHandle);
+  }
+}
+
+// Check for --warm flag
+const isWarmMode = process.argv.includes('--warm');
+
+if (isWarmMode) {
+  mainWarm();
+} else {
+  mainCold();
+}

@@ -14,9 +14,17 @@ const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 
 export interface IpcMcpContext {
-  chatJid: string;
-  groupFolder: string;
+  sessionKey: string;  // Format: chatId_topicId
+  folder: string;
   isMain: boolean;
+}
+
+function parseSessionKey(sessionKey: string): { chatId: number; topicId: number } {
+  const [chatIdStr, topicIdStr] = sessionKey.split('_');
+  return {
+    chatId: parseInt(chatIdStr, 10),
+    topicId: parseInt(topicIdStr || '0', 10)
+  };
 }
 
 function writeIpcFile(dir: string, data: object): string {
@@ -34,7 +42,8 @@ function writeIpcFile(dir: string, data: object): string {
 }
 
 export function createIpcMcp(ctx: IpcMcpContext) {
-  const { chatJid, groupFolder, isMain } = ctx;
+  const { sessionKey, folder, isMain } = ctx;
+  const { chatId, topicId } = parseSessionKey(sessionKey);
 
   return createSdkMcpServer({
     name: 'nanoclaw',
@@ -42,16 +51,17 @@ export function createIpcMcp(ctx: IpcMcpContext) {
     tools: [
       tool(
         'send_message',
-        'Send a message to the current WhatsApp group. Use this to proactively share information or updates.',
+        'Send a message to the current Telegram chat/topic. Use this to proactively share information or updates.',
         {
           text: z.string().describe('The message text to send')
         },
         async (args) => {
           const data = {
             type: 'message',
-            chatJid,
+            chatId,
+            topicId,
             text: args.text,
-            groupFolder,
+            folder,
             timestamp: new Date().toISOString()
           };
 
@@ -61,6 +71,34 @@ export function createIpcMcp(ctx: IpcMcpContext) {
             content: [{
               type: 'text',
               text: `Message queued for delivery (${filename})`
+            }]
+          };
+        }
+      ),
+
+      tool(
+        'react_to_message',
+        'React to a message with an emoji. Use standard Telegram reaction emojis.',
+        {
+          message_id: z.number().describe('The message ID to react to'),
+          emoji: z.string().describe('The emoji to react with (e.g., "👍", "❤", "🔥", "👏", "😁")')
+        },
+        async (args) => {
+          const data = {
+            type: 'reaction',
+            chatId,
+            messageId: args.message_id,
+            emoji: args.emoji,
+            folder,
+            timestamp: new Date().toISOString()
+          };
+
+          const filename = writeIpcFile(MESSAGES_DIR, data);
+
+          return {
+            content: [{
+              type: 'text',
+              text: `Reaction queued (${filename}): ${args.emoji} on message ${args.message_id}`
             }]
           };
         }
@@ -89,7 +127,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
           schedule_type: z.enum(['cron', 'interval', 'once']).describe('cron=recurring at specific times, interval=recurring every N ms, once=run once at specific time'),
           schedule_value: z.string().describe('cron: "*/5 * * * *" | interval: milliseconds like "300000" | once: local timestamp like "2026-02-01T15:30:00" (no Z suffix!)'),
           context_mode: z.enum(['group', 'isolated']).default('group').describe('group=runs with chat history and memory, isolated=fresh session (include context in prompt)'),
-          target_group: z.string().optional().describe('Target group folder (main only, defaults to current group)')
+          target_folder: z.string().optional().describe('Target folder (main only, defaults to current folder)')
         },
         async (args) => {
           // Validate schedule_value before writing IPC
@@ -114,24 +152,25 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
             const date = new Date(args.schedule_value);
             if (isNaN(date.getTime())) {
               return {
-                content: [{ type: 'text', text: `Invalid timestamp: "${args.schedule_value}". Use ISO 8601 format like "2026-02-01T15:30:00.000Z".` }],
+                content: [{ type: 'text', text: `Invalid timestamp: "${args.schedule_value}". Use ISO 8601 format like "2026-02-01T15:30:00".` }],
                 isError: true
               };
             }
           }
 
           // Non-main groups can only schedule for themselves
-          const targetGroup = isMain && args.target_group ? args.target_group : groupFolder;
+          const targetFolder = isMain && args.target_folder ? args.target_folder : folder;
 
           const data = {
             type: 'schedule_task',
             prompt: args.prompt,
-            schedule_type: args.schedule_type,
-            schedule_value: args.schedule_value,
-            context_mode: args.context_mode || 'group',
-            groupFolder: targetGroup,
-            chatJid,
-            createdBy: groupFolder,
+            scheduleType: args.schedule_type,
+            scheduleValue: args.schedule_value,
+            contextMode: args.context_mode || 'group',
+            folder: targetFolder,
+            chatId,
+            topicId,
+            createdBy: folder,
             timestamp: new Date().toISOString()
           };
 
@@ -168,7 +207,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
 
             const tasks = isMain
               ? allTasks
-              : allTasks.filter((t: { groupFolder: string }) => t.groupFolder === groupFolder);
+              : allTasks.filter((t: { folder: string }) => t.folder === folder);
 
             if (tasks.length === 0) {
               return {
@@ -179,8 +218,8 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
               };
             }
 
-            const formatted = tasks.map((t: { id: string; prompt: string; schedule_type: string; schedule_value: string; status: string; next_run: string }) =>
-              `- [${t.id}] ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`
+            const formatted = tasks.map((t: { id: string; prompt: string; scheduleType: string; scheduleValue: string; status: string; nextRun: string | null }) =>
+              `- [${t.id}] ${t.prompt.slice(0, 50)}... (${t.scheduleType}: ${t.scheduleValue}) - ${t.status}, next: ${t.nextRun || 'N/A'}`
             ).join('\n');
 
             return {
@@ -210,7 +249,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
           const data = {
             type: 'pause_task',
             taskId: args.task_id,
-            groupFolder,
+            folder,
             isMain,
             timestamp: new Date().toISOString()
           };
@@ -236,7 +275,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
           const data = {
             type: 'resume_task',
             taskId: args.task_id,
-            groupFolder,
+            folder,
             isMain,
             timestamp: new Date().toISOString()
           };
@@ -262,7 +301,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
           const data = {
             type: 'cancel_task',
             taskId: args.task_id,
-            groupFolder,
+            folder,
             isMain,
             timestamp: new Date().toISOString()
           };
@@ -279,30 +318,30 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       ),
 
       tool(
-        'register_group',
-        `Register a new WhatsApp group so the agent can respond to messages there. Main group only.
+        'register_chat',
+        `Register a new Telegram chat so the agent can respond to messages there. Main group only.
 
-Use available_groups.json to find the JID for a group. The folder name should be lowercase with hyphens (e.g., "family-chat").`,
+Use available_chats.json to find the chat ID. The folder name should be lowercase with hyphens (e.g., "family-chat").`,
         {
-          jid: z.string().describe('The WhatsApp JID (e.g., "120363336345536173@g.us")'),
-          name: z.string().describe('Display name for the group'),
-          folder: z.string().describe('Folder name for group files (lowercase, hyphens, e.g., "family-chat")'),
-          trigger: z.string().describe('Trigger word (e.g., "@Andy")')
+          chat_id: z.number().describe('The Telegram chat ID'),
+          chat_type: z.enum(['private', 'group', 'supergroup', 'channel']).describe('Type of chat'),
+          chat_title: z.string().describe('Display name for the chat'),
+          trigger_mode: z.enum(['always', 'mention', 'disabled']).default('mention').describe('When to respond: always=all messages, mention=only when mentioned, disabled=never')
         },
         async (args) => {
           if (!isMain) {
             return {
-              content: [{ type: 'text', text: 'Only the main group can register new groups.' }],
+              content: [{ type: 'text', text: 'Only the main group can register new chats.' }],
               isError: true
             };
           }
 
           const data = {
-            type: 'register_group',
-            jid: args.jid,
-            name: args.name,
-            folder: args.folder,
-            trigger: args.trigger,
+            type: 'register_chat',
+            chatId: args.chat_id,
+            chatType: args.chat_type,
+            chatTitle: args.chat_title,
+            triggerMode: args.trigger_mode,
             timestamp: new Date().toISOString()
           };
 
@@ -311,7 +350,38 @@ Use available_groups.json to find the JID for a group. The folder name should be
           return {
             content: [{
               type: 'text',
-              text: `Group "${args.name}" registered. It will start receiving messages immediately.`
+              text: `Chat "${args.chat_title}" (${args.chat_id}) registered with trigger mode: ${args.trigger_mode}. It will start receiving messages immediately.`
+            }]
+          };
+        }
+      ),
+
+      tool(
+        'service_control',
+        'Control the NanoClaw service (main group only). Use to restart after code changes or rebuild the project.',
+        {
+          action: z.enum(['restart', 'rebuild']).describe('restart=restart service, rebuild=npm run build then restart')
+        },
+        async (args) => {
+          if (!isMain) {
+            return {
+              content: [{ type: 'text', text: 'Only the main group can control the service.' }],
+              isError: true
+            };
+          }
+
+          const data = {
+            type: 'service_control',
+            action: args.action,
+            timestamp: new Date().toISOString()
+          };
+
+          writeIpcFile(TASKS_DIR, data);
+
+          return {
+            content: [{
+              type: 'text',
+              text: `Service ${args.action} requested. The service will ${args.action === 'rebuild' ? 'rebuild and ' : ''}restart shortly.`
             }]
           };
         }
