@@ -1,6 +1,6 @@
 # Nanomi
 
-My personal Claude assistant, built on [NanoClaw](https://github.com/gavrielc/nanoclaw).
+One of my personal assistant agents, built on [NanoClaw](https://github.com/gavrielc/nanoclaw).
 
 ## What This Is
 
@@ -23,8 +23,8 @@ Single Node.js process. Each chat/topic gets isolated memory (`groups/{folder}/C
 ## Getting Started
 
 ```bash
-git clone https://github.com/aaronkzhou/nanomi.git
-cd nanomi
+git clone https://github.com/pyraxo/nanoclaw.git
+cd nanoclaw
 claude
 ```
 
