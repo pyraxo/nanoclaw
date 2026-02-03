@@ -1,0 +1,5 @@
+{
+  "name": "add-warm-containers",
+  "description": "Implement warm container pooling to reduce latency. Keeps containers alive for 30min (configurable) and pre-warms containers for instant response.",
+  "triggers": ["warm containers", "container pool", "keep containers warm", "prewarm", "reduce container latency"]
+}
